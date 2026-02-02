@@ -1,6 +1,6 @@
 # AGENTS.md - Adaptive Structure Fingerprinting System
 
-A complete specification for building an intelligent web structure fingerprinting system with adaptive learning, Ollama Cloud LLM integration, and comprehensive verbose logging.
+A complete specification for building an intelligent web structure fingerprinting system with adaptive learning, Ollama Cloud LLM integration, comprehensive verbose logging, and **ethical compliance** (CFAA, robots.txt RFC 9309, GDPR/CCPA, adaptive rate limiting).
 
 ## Purpose
 
@@ -51,6 +51,31 @@ adaptive-fingerprint/
 │   │   ├── structure_store.py      # Structure storage
 │   │   ├── embedding_store.py      # Embedding storage
 │   │   └── cache.py                # Caching utilities
+│   │
+│   ├── compliance/                 # Ethical compliance
+│   │   ├── __init__.py
+│   │   ├── robots_parser.py        # robots.txt parser (RFC 9309)
+│   │   ├── rate_limiter.py         # Adaptive rate limiting
+│   │   └── bot_detector.py         # Anti-bot detection/respect
+│   │
+│   ├── legal/                      # Legal compliance
+│   │   ├── __init__.py
+│   │   ├── cfaa_checker.py         # CFAA authorization
+│   │   ├── tos_checker.py          # Terms of Service
+│   │   ├── gdpr_handler.py         # GDPR compliance
+│   │   └── ccpa_handler.py         # CCPA compliance
+│   │
+│   ├── extraction/                 # Content extraction
+│   │   ├── __init__.py
+│   │   ├── extractor.py            # Content extraction engine
+│   │   ├── file_writer.py          # Save content to files
+│   │   └── formats.py              # Output format handlers (JSON, CSV, etc.)
+│   │
+│   ├── alerting/                   # Change alerts and review
+│   │   ├── __init__.py
+│   │   ├── change_monitor.py       # Monitor for breaking changes
+│   │   ├── review_queue.py         # Manual review queue
+│   │   └── notifiers.py            # Alert notifications (log, webhook, email)
 │   │
 │   └── utils/                      # Utilities
 │       ├── __init__.py
@@ -188,10 +213,101 @@ redis:
 
 # HTTP fetching
 http:
-  user_agent: "AdaptiveFingerprint/1.0"
+  user_agent: "AdaptiveFingerprint/1.0 (+https://example.com/bot-info)"
   timeout: 30
   max_retries: 3
-  respect_robots_txt: true
+
+# Compliance settings (ethical web access)
+compliance:
+  # robots.txt (RFC 9309)
+  robots_txt:
+    enabled: true
+    cache_ttl: 3600           # Cache robots.txt for 1 hour
+    respect_crawl_delay: true
+    default_crawl_delay: 1.0  # Seconds between requests if not specified
+
+  # Adaptive rate limiting
+  rate_limiting:
+    enabled: true
+    default_delay: 1.0        # Default delay between requests (seconds)
+    min_delay: 0.5            # Minimum delay
+    max_delay: 30.0           # Maximum delay
+    backoff_multiplier: 2.0   # Backoff on 429/503 responses
+    adapt_to_response_time: true  # Slow down if server is slow
+
+  # Anti-bot respect
+  anti_bot:
+    enabled: true
+    respect_retry_after: true
+    stop_on_captcha: true
+    stop_on_block_page: true
+
+# Legal compliance
+legal:
+  # CFAA (Computer Fraud and Abuse Act)
+  cfaa:
+    enabled: true
+    require_public_access: true      # Only access publicly available pages
+    block_authenticated_areas: true  # Don't access login-protected content
+    block_api_endpoints: true        # Don't access API endpoints without permission
+
+  # Terms of Service
+  tos:
+    enabled: true
+    check_meta_tags: true     # Check for meta robots tags
+    respect_noindex: true     # Respect noindex directives
+    respect_nofollow: true    # Respect nofollow directives
+
+  # GDPR (General Data Protection Regulation)
+  gdpr:
+    enabled: true
+    pii_detection: true       # Detect personally identifiable information
+    pii_handling: "redact"    # "redact", "pseudonymize", or "skip"
+    log_pii_access: true      # Log when PII is encountered
+
+  # CCPA (California Consumer Privacy Act)
+  ccpa:
+    enabled: true
+    respect_opt_out: true     # Respect "do not sell" signals
+    respect_gpc: true         # Respect Global Privacy Control header
+
+# Content extraction
+extraction:
+  enabled: true
+  output_dir: "./extracted"           # Directory for extracted content
+  formats: ["json", "csv"]            # Output formats
+  include_metadata: true              # Include extraction metadata
+  include_html: false                 # Include raw HTML in output
+  max_content_length: 1000000         # Max content size (bytes)
+
+# Change alerting and review
+alerting:
+  enabled: true
+
+  # Alert thresholds
+  alert_on_breaking: true             # Alert on breaking changes
+  alert_on_moderate: false            # Alert on moderate changes
+  alert_threshold: 0.70               # Similarity below this triggers alert
+
+  # Review queue
+  review_queue:
+    enabled: true
+    auto_approve_cosmetic: true       # Auto-approve cosmetic changes
+    auto_approve_minor: false         # Auto-approve minor changes
+    require_review_breaking: true     # Require manual review for breaking
+    max_queue_size: 1000              # Max pending reviews
+
+  # Notifications
+  notifications:
+    log: true                         # Log alerts
+    webhook:
+      enabled: false
+      url: ""                         # Webhook URL for alerts
+    email:
+      enabled: false
+      smtp_host: ""
+      smtp_port: 587
+      recipients: []
 
 # Verbose logging
 verbose:
@@ -442,6 +558,110 @@ class ExtractionStrategy:
     learned_at: datetime = field(default_factory=datetime.utcnow)
     learning_source: str = "initial"  # "initial", "adaptation", "manual"
     confidence_scores: dict[str, float] = field(default_factory=dict)
+
+
+# ============== EXTRACTION MODELS ==============
+
+@dataclass
+class ExtractedContent:
+    """Extracted content from a page."""
+    url: str
+    domain: str
+    page_type: str
+
+    # Extracted fields
+    title: str = ""
+    content: str = ""
+    metadata: dict[str, str] = field(default_factory=dict)
+
+    # Raw data
+    html: str = ""
+
+    # Extraction info
+    extracted_at: datetime = field(default_factory=datetime.utcnow)
+    strategy_version: int = 1
+    extraction_confidence: float = 0.0
+
+    # File output
+    output_file: str | None = None
+
+
+@dataclass
+class ExtractionResult:
+    """Result of content extraction operation."""
+    success: bool
+    content: ExtractedContent | None = None
+    error: str = ""
+
+    # Statistics
+    fields_extracted: int = 0
+    content_length: int = 0
+    duration_ms: float = 0.0
+
+
+# ============== ALERTING MODELS ==============
+
+class ReviewStatus(Enum):
+    """Status of a review item."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    AUTO_APPROVED = "auto_approved"
+
+
+class AlertSeverity(Enum):
+    """Severity of change alert."""
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+@dataclass
+class ChangeAlert:
+    """Alert for detected structure change."""
+    id: str
+    domain: str
+    page_type: str
+    url: str
+
+    # Change details
+    change_analysis: ChangeAnalysis
+    severity: AlertSeverity
+
+    # Timestamps
+    detected_at: datetime = field(default_factory=datetime.utcnow)
+    acknowledged_at: datetime | None = None
+
+    # Status
+    acknowledged: bool = False
+    acknowledged_by: str = ""
+
+
+@dataclass
+class ReviewItem:
+    """Item in the manual review queue."""
+    id: str
+    domain: str
+    page_type: str
+
+    # Structures to compare
+    old_structure_version: int
+    new_structure_version: int
+
+    # Change analysis
+    change_analysis: ChangeAnalysis
+
+    # Review status
+    status: ReviewStatus = ReviewStatus.PENDING
+    reviewer: str = ""
+    review_notes: str = ""
+
+    # Timestamps
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    reviewed_at: datetime | None = None
+
+    # Actions
+    auto_adapt: bool = False  # Whether to auto-adapt on approval
 ```
 
 ---
@@ -752,6 +972,89 @@ class HTTPStatusError(FetchError):
     def __init__(self, status_code: int, message: str = ""):
         self.status_code = status_code
         super().__init__(f"HTTP {status_code}: {message}")
+
+
+# Compliance errors
+class ComplianceError(FingerprintError):
+    """Base error for compliance violations."""
+    pass
+
+
+class RobotsBlockedError(ComplianceError):
+    """URL blocked by robots.txt."""
+    def __init__(self, url: str, directive: str = ""):
+        self.url = url
+        self.directive = directive
+        super().__init__(f"Blocked by robots.txt: {url}")
+
+
+class RateLimitExceededError(ComplianceError):
+    """Rate limit exceeded for domain."""
+    def __init__(self, domain: str, retry_after: float | None = None):
+        self.domain = domain
+        self.retry_after = retry_after
+        super().__init__(f"Rate limit exceeded for {domain}")
+
+
+class CrawlDelayError(ComplianceError):
+    """Crawl-delay not respected."""
+    pass
+
+
+class BotDetectedError(ComplianceError):
+    """Anti-bot system detected our requests."""
+    def __init__(self, url: str, detection_type: str = ""):
+        self.url = url
+        self.detection_type = detection_type
+        super().__init__(f"Bot detected at {url}: {detection_type}")
+
+
+class CaptchaEncounteredError(BotDetectedError):
+    """CAPTCHA challenge encountered."""
+    pass
+
+
+# Legal compliance errors
+class LegalComplianceError(FingerprintError):
+    """Base error for legal compliance issues."""
+    pass
+
+
+class CFAAViolationError(LegalComplianceError):
+    """Potential CFAA violation detected."""
+    def __init__(self, url: str, reason: str):
+        self.url = url
+        self.reason = reason
+        super().__init__(f"CFAA violation risk at {url}: {reason}")
+
+
+class UnauthorizedAccessError(CFAAViolationError):
+    """Attempting to access unauthorized content."""
+    pass
+
+
+class ToSViolationError(LegalComplianceError):
+    """Terms of Service violation detected."""
+    def __init__(self, url: str, directive: str):
+        self.url = url
+        self.directive = directive
+        super().__init__(f"ToS violation at {url}: {directive}")
+
+
+class GDPRViolationError(LegalComplianceError):
+    """GDPR compliance issue detected."""
+    def __init__(self, url: str, pii_type: str = ""):
+        self.url = url
+        self.pii_type = pii_type
+        super().__init__(f"GDPR violation at {url}: PII detected ({pii_type})")
+
+
+class CCPAViolationError(LegalComplianceError):
+    """CCPA compliance issue detected."""
+    def __init__(self, url: str, reason: str = ""):
+        self.url = url
+        self.reason = reason
+        super().__init__(f"CCPA violation at {url}: {reason}")
 ```
 
 ---
@@ -1073,6 +1376,142 @@ Intelligent mode selection that starts with fast rules-based comparison and esca
 
 ---
 
+## Ethical Compliance Pipeline
+
+All URL fetching MUST pass through the compliance pipeline in this exact order. The pipeline enforces ethical web access and legal compliance.
+
+### Pipeline Order
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    COMPLIANCE PIPELINE                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. CFAA Check ─────────► Is access authorized?                │
+│         │                                                       │
+│         ▼                                                       │
+│  2. ToS Check ──────────► Does ToS allow crawling?             │
+│         │                                                       │
+│         ▼                                                       │
+│  3. robots.txt ─────────► Is path allowed? (RFC 9309)          │
+│         │                                                       │
+│         ▼                                                       │
+│  4. Rate Limiter ───────► Acquire slot, respect Crawl-delay    │
+│         │                                                       │
+│         ▼                                                       │
+│  5. HTTP Fetch ─────────► Make request with proper headers     │
+│         │                                                       │
+│         ▼                                                       │
+│  6. Anti-Bot Check ─────► Detect captcha/block pages           │
+│         │                                                       │
+│         ▼                                                       │
+│  7. GDPR/CCPA Check ───► Scan for PII, apply handling          │
+│         │                                                       │
+│         ▼                                                       │
+│  8. Return Content ────► Clean content ready for analysis      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Pipeline Implementation
+
+```python
+async def fetch_with_compliance(self, url: str) -> FetchResult:
+    """
+    Fetch URL through full compliance pipeline.
+
+    Verbose output:
+        [CFAA:CHECK] Checking authorization for https://example.com/page
+        [CFAA:AUTHORIZED] Access authorized (public page)
+        [TOS:CHECK] Checking Terms of Service
+        [TOS:ALLOWED] No restrictive meta tags found
+        [ROBOTS:CHECK] Checking robots.txt for /page
+        [ROBOTS:ALLOWED] Path allowed by robots.txt
+        [RATELIMIT:ACQUIRE] Acquiring slot for example.com
+        [RATELIMIT:WAIT] Waiting 1.5s (Crawl-delay)
+        [FETCH:REQUEST] GET https://example.com/page
+        [FETCH:RESPONSE] 200 OK (1.2s, 45KB)
+        [ANTIBOT:CHECK] Scanning for bot detection
+        [ANTIBOT:CLEAR] No bot detection found
+        [GDPR:SCAN] Scanning for PII
+        [GDPR:CLEAR] No PII detected
+    """
+    domain = get_domain(url)
+
+    # 1. CFAA authorization check
+    cfaa_result = await self.cfaa_checker.is_authorized(url)
+    if not cfaa_result.authorized:
+        self.logger.warn("CFAA", "BLOCKED", f"Access blocked: {cfaa_result.reason}")
+        return FetchResult.blocked(url, reason=cfaa_result.reason)
+
+    # 2. Terms of Service check
+    tos_result = await self.tos_checker.check(url)
+    if not tos_result.allowed:
+        self.logger.warn("TOS", "BLOCKED", f"ToS violation: {tos_result.directive}")
+        return FetchResult.blocked(url, reason=f"ToS: {tos_result.directive}")
+
+    # 3. robots.txt check (RFC 9309)
+    if not await self.robots_checker.is_allowed(url):
+        self.logger.info("ROBOTS", "BLOCKED", f"Blocked by robots.txt")
+        return FetchResult.blocked(url, reason="robots.txt")
+
+    # 4. Rate limiting with Crawl-delay respect
+    await self.rate_limiter.acquire(domain)
+
+    # 5. HTTP fetch
+    try:
+        response = await self.http_client.get(url)
+    except Exception as e:
+        self.rate_limiter.report_error(domain)
+        raise
+
+    # 6. Anti-bot detection
+    bot_check = await self.bot_detector.check(response)
+    if bot_check.detected:
+        self.logger.warn("ANTIBOT", "DETECTED", f"Bot detection: {bot_check.type}")
+        self.rate_limiter.backoff(domain)
+        return FetchResult.blocked(url, reason=f"Bot detected: {bot_check.type}")
+
+    # 7. GDPR/CCPA compliance
+    if self.gdpr_config.enabled:
+        response = await self.pii_handler.process(response)
+
+    if self.ccpa_config.enabled:
+        response = await self.ccpa_handler.process(response)
+
+    # 8. Report success and return
+    self.rate_limiter.report_success(domain, response.elapsed)
+    return FetchResult.success(url, response)
+```
+
+### Compliance Bypass (Never Allowed)
+
+The compliance pipeline CANNOT be bypassed. Even internal URLs must pass through:
+
+```python
+# WRONG - Never do this
+response = await self.http_client.get(url)  # Bypasses compliance!
+
+# CORRECT - Always use the pipeline
+result = await self.fetch_with_compliance(url)
+```
+
+### Error Handling
+
+| Check | On Failure | Action |
+|-------|------------|--------|
+| CFAA | `CFAAViolationError` | Block URL, log reason |
+| ToS | `ToSViolationError` | Block URL, respect directive |
+| robots.txt | `RobotsBlockedError` | Skip URL silently |
+| Rate Limit | `RateLimitExceededError` | Wait and retry |
+| Anti-Bot | `BotDetectedError` | Backoff, may stop crawl |
+| GDPR | `GDPRViolationError` | Redact/skip PII |
+| CCPA | `CCPAViolationError` | Respect opt-out |
+
+See `fingerprint/compliance/AGENTS.md` and `fingerprint/legal/AGENTS.md` for complete implementation details.
+
+---
+
 ## Ollama Cloud Integration
 
 ### Endpoint
@@ -1163,6 +1602,18 @@ All modules use consistent verbose logging:
 | ML | `ML` | DESCRIBE, EMBED, SIMILARITY |
 | Ollama | `OLLAMA` | INIT, REQUEST, RESPONSE, ERROR |
 | Store | `STORE` | GET, SAVE, UPDATE, DELETE |
+| Robots | `ROBOTS` | FETCH, PARSE, CHECK, ALLOWED, BLOCKED |
+| RateLimit | `RATELIMIT` | INIT, ACQUIRE, WAIT, ADAPT, BACKOFF |
+| AntiBot | `ANTIBOT` | CHECK, CAPTCHA, BLOCK, RESPECT |
+| CFAA | `CFAA` | CHECK, AUTHORIZED, BLOCKED, VIOLATION |
+| ToS | `TOS` | CHECK, META, NOINDEX, NOFOLLOW |
+| GDPR | `GDPR` | SCAN, PII_FOUND, REDACT, PSEUDONYMIZE |
+| CCPA | `CCPA` | CHECK, OPT_OUT, GPC |
+| Extract | `EXTRACT` | INIT, START, CONTENT, FIELD, SAVE, COMPLETE |
+| FileWriter | `FILEWRITER` | INIT, WRITE, FORMAT, PATH, COMPLETE |
+| Alert | `ALERT` | INIT, DETECT, CREATE, SEND, ACKNOWLEDGE |
+| Review | `REVIEW` | QUEUE, ADD, APPROVE, REJECT, AUTO_APPROVE |
+| Notify | `NOTIFY` | INIT, LOG, WEBHOOK, EMAIL, SEND |
 
 ---
 
@@ -1170,10 +1621,14 @@ All modules use consistent verbose logging:
 
 The following AGENTS.md files contain detailed implementation specifications for each module:
 
-- `fingerprint/core/AGENTS.md` - Core analyzer and orchestration
+- `fingerprint/core/AGENTS.md` - Core analyzer, orchestration, and compliance pipeline
 - `fingerprint/adaptive/AGENTS.md` - Rules-based fingerprinting and change detection
 - `fingerprint/ml/AGENTS.md` - ML embeddings and Ollama Cloud integration
 - `fingerprint/storage/AGENTS.md` - Redis storage layer
+- `fingerprint/compliance/AGENTS.md` - robots.txt, rate limiting, anti-bot detection
+- `fingerprint/legal/AGENTS.md` - CFAA, ToS, GDPR, CCPA compliance
+- `fingerprint/extraction/AGENTS.md` - Content extraction and file saving
+- `fingerprint/alerting/AGENTS.md` - Change alerts and manual review queue
 
 ---
 
