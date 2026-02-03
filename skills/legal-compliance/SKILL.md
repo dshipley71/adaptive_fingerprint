@@ -209,3 +209,7 @@ legal:
 | `GDPR:PSEUDONYMIZE` | Pseudonymizing PII |
 | `CCPA:GPC` | GPC signal detected |
 | `CCPA:OPT_OUT` | "Do Not Sell" indicator found |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, PII regex patterns, and path blocklists

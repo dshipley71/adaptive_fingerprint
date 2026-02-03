@@ -133,3 +133,7 @@ Environment variable override: `REDIS_URL`.
 | `CACHE:HIT` | Cache hit |
 | `CACHE:MISS` | Cache miss |
 | `CACHE:EXPIRE` | Expired entries cleaned |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, Redis commands, and serialization logic

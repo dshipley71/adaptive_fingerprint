@@ -148,3 +148,7 @@ class PageClassifier:
 | `CLASSIFY:START` | Classification started |
 | `CLASSIFY:COMPARE` | Similarity against each reference |
 | `CLASSIFY:RESULT` | Final classification with score |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, API payloads, and prompt templates

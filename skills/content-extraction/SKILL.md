@@ -172,3 +172,7 @@ extraction:
 | `EXTRACT:RESULT` | Extraction complete (fields, duration) |
 | `FILEWRITER:SAVE` | Saving to file (path, format) |
 | `FILEWRITER:BATCH` | Saving batch (count, format) |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, post-processors, and format handlers
