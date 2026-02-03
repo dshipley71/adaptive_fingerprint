@@ -3,14 +3,24 @@
 # skills.sh - Adaptive Structure Fingerprinting System
 # =============================================================================
 #
-# Project setup, scaffolding, and development utilities derived from
-# the AGENTS.md specification files.
+# Agent Skills manager and project development utilities.
+#
+# This script serves two roles:
+#   1. Agent Skills discovery, listing, and validation (SKILL.md format per
+#      the Anthropic Agent Skills specification: https://skills.sh/)
+#   2. Project scaffolding, dependency management, and dev workflow commands
 #
 # Usage:
 #   chmod +x skills.sh
 #   ./skills.sh <command>
 #
-# Commands:
+# Skills commands:
+#   skills              - List all available Agent Skills
+#   skills show <name>  - Display a skill's SKILL.md content
+#   skills validate     - Validate all skills against the Agent Skills spec
+#   skills tree         - Show the full skills directory tree
+#
+# Project commands:
 #   scaffold      - Create full project directory structure and source files
 #   deps          - Install Python dependencies into a virtual environment
 #   config        - Generate config.example.yaml and .env.example
@@ -31,6 +41,7 @@ set -euo pipefail
 # Constants
 # ---------------------------------------------------------------------------
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_DIR="${PROJECT_ROOT}/skills"
 VENV_DIR="${PROJECT_ROOT}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 PIP="${VENV_DIR}/bin/pip"
@@ -44,7 +55,9 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BLUE='\033[0;34m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m' # No Color
 
 log_info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
@@ -52,6 +65,289 @@ log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 log_step()  { echo -e "${BOLD}==> $*${NC}"; }
+
+# ===========================================================================
+# skills - Agent Skills management
+# ===========================================================================
+cmd_skills() {
+    local subcmd="${1:-list}"
+    shift || true
+
+    case "$subcmd" in
+        list)       _skills_list ;;
+        show)       _skills_show "$@" ;;
+        validate)   _skills_validate ;;
+        tree)       _skills_tree ;;
+        *)
+            # If the argument looks like a skill name, try show
+            if [ -d "${SKILLS_DIR}/${subcmd}" ]; then
+                _skills_show "$subcmd"
+            else
+                log_error "Unknown skills subcommand: $subcmd"
+                echo "  Usage: ./skills.sh skills [list|show <name>|validate|tree]"
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+_skills_list() {
+    echo ""
+    echo -e "${BOLD}Adaptive Fingerprint - Agent Skills${NC}"
+    echo -e "${DIM}Format: Anthropic Agent Skills (SKILL.md)${NC}"
+    echo -e "${DIM}Spec:   https://skills.sh/${NC}"
+    echo ""
+
+    if [ ! -d "$SKILLS_DIR" ]; then
+        log_warn "No skills directory found at ${SKILLS_DIR}"
+        return
+    fi
+
+    local count=0
+
+    for skill_dir in "${SKILLS_DIR}"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_md="${skill_dir}SKILL.md"
+        [ -f "$skill_md" ] || continue
+
+        local name description
+        name=$(_extract_frontmatter_field "$skill_md" "name")
+        description=$(_extract_frontmatter_field "$skill_md" "description")
+
+        # Truncate description for display
+        if [ ${#description} -gt 100 ]; then
+            description="${description:0:97}..."
+        fi
+
+        printf "  ${GREEN}%-28s${NC} %s\n" "$name" "$description"
+        count=$((count + 1))
+    done
+
+    echo ""
+    echo -e "  ${DIM}${count} skills available${NC}"
+    echo ""
+    echo "  Show a skill:     ./skills.sh skills show <name>"
+    echo "  Validate all:     ./skills.sh skills validate"
+    echo "  Directory tree:   ./skills.sh skills tree"
+    echo ""
+}
+
+_skills_show() {
+    local name="${1:-}"
+    if [ -z "$name" ]; then
+        log_error "Skill name required"
+        echo "  Usage: ./skills.sh skills show <name>"
+        echo ""
+        echo "  Available skills:"
+        for skill_dir in "${SKILLS_DIR}"/*/; do
+            [ -d "$skill_dir" ] || continue
+            [ -f "${skill_dir}SKILL.md" ] || continue
+            local sname
+            sname=$(_extract_frontmatter_field "${skill_dir}SKILL.md" "name")
+            echo "    $sname"
+        done
+        exit 1
+    fi
+
+    local skill_md="${SKILLS_DIR}/${name}/SKILL.md"
+    if [ ! -f "$skill_md" ]; then
+        log_error "Skill not found: $name"
+        echo "  Looking for: ${skill_md}"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${BOLD}Skill: ${name}${NC}"
+    echo -e "${DIM}$(printf '%.0s-' {1..60})${NC}"
+
+    # Show metadata
+    local desc
+    desc=$(_extract_frontmatter_field "$skill_md" "description")
+    echo -e "${CYAN}Description:${NC} ${desc}"
+
+    # List references
+    local ref_dir="${SKILLS_DIR}/${name}/references"
+    if [ -d "$ref_dir" ] && [ "$(ls -A "$ref_dir" 2>/dev/null)" ]; then
+        echo -e "${CYAN}References:${NC}"
+        for ref in "${ref_dir}"/*; do
+            [ -f "$ref" ] || continue
+            echo "  - $(basename "$ref")"
+        done
+    fi
+
+    # List scripts
+    local script_dir="${SKILLS_DIR}/${name}/scripts"
+    if [ -d "$script_dir" ] && [ "$(ls -A "$script_dir" 2>/dev/null)" ]; then
+        echo -e "${CYAN}Scripts:${NC}"
+        for scr in "${script_dir}"/*; do
+            [ -f "$scr" ] || continue
+            echo "  - $(basename "$scr")"
+        done
+    fi
+
+    echo -e "${DIM}$(printf '%.0s-' {1..60})${NC}"
+    echo ""
+
+    # Display SKILL.md body (after frontmatter)
+    awk 'BEGIN{fm=0} /^---$/{fm++; next} fm>=2{print}' "$skill_md"
+    echo ""
+}
+
+_skills_validate() {
+    log_step "Validating Agent Skills"
+
+    if [ ! -d "$SKILLS_DIR" ]; then
+        log_error "No skills directory found at ${SKILLS_DIR}"
+        exit 1
+    fi
+
+    local total=0
+    local passed=0
+    local failed=0
+    local errors=""
+
+    for skill_dir in "${SKILLS_DIR}"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name
+        skill_name=$(basename "$skill_dir")
+        local skill_md="${skill_dir}SKILL.md"
+        total=$((total + 1))
+
+        local skill_errors=""
+
+        # Check SKILL.md exists
+        if [ ! -f "$skill_md" ]; then
+            skill_errors="${skill_errors}\n    - Missing SKILL.md"
+        else
+            # Check frontmatter delimiters
+            local first_line
+            first_line=$(head -1 "$skill_md")
+            if [ "$first_line" != "---" ]; then
+                skill_errors="${skill_errors}\n    - SKILL.md must begin with --- (YAML frontmatter)"
+            fi
+
+            # Check required fields
+            local name_val desc_val
+            name_val=$(_extract_frontmatter_field "$skill_md" "name")
+            desc_val=$(_extract_frontmatter_field "$skill_md" "description")
+
+            if [ -z "$name_val" ]; then
+                skill_errors="${skill_errors}\n    - Missing required field: name"
+            fi
+
+            if [ -z "$desc_val" ]; then
+                skill_errors="${skill_errors}\n    - Missing required field: description"
+            elif [ ${#desc_val} -gt 1024 ]; then
+                skill_errors="${skill_errors}\n    - Description exceeds 1024 characters (${#desc_val})"
+            fi
+
+            # Check for markdown body after frontmatter
+            local body_lines
+            body_lines=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm>=2{print}' "$skill_md" | wc -l)
+            if [ "$body_lines" -lt 3 ]; then
+                skill_errors="${skill_errors}\n    - SKILL.md body has very few lines (${body_lines}); add instructions"
+            fi
+
+            # Check for disallowed frontmatter fields
+            local fm_fields
+            fm_fields=$(awk 'BEGIN{fm=0} /^---$/{fm++; next} fm==1 && /^[a-z]/{print $1}' "$skill_md" | sed 's/://')
+            for fld in $fm_fields; do
+                case "$fld" in
+                    name|description|license|allowed-tools|metadata) ;;
+                    *) skill_errors="${skill_errors}\n    - Unknown frontmatter field: ${fld}" ;;
+                esac
+            done
+
+            # Check naming convention (should match directory name)
+            if [ -n "$name_val" ] && [ "$name_val" != "$skill_name" ]; then
+                skill_errors="${skill_errors}\n    - Name '${name_val}' does not match directory '${skill_name}'"
+            fi
+        fi
+
+        if [ -z "$skill_errors" ]; then
+            printf "  ${GREEN}PASS${NC}  %s\n" "$skill_name"
+            passed=$((passed + 1))
+        else
+            printf "  ${RED}FAIL${NC}  %s\n" "$skill_name"
+            echo -e "$skill_errors"
+            failed=$((failed + 1))
+            errors="${errors}\n  ${skill_name}:${skill_errors}"
+        fi
+    done
+
+    echo ""
+    echo -e "  Total: ${total}  ${GREEN}Passed: ${passed}${NC}  ${RED}Failed: ${failed}${NC}"
+
+    if [ "$failed" -gt 0 ]; then
+        echo ""
+        log_error "Validation failed for ${failed} skill(s)"
+        exit 1
+    else
+        echo ""
+        log_ok "All skills passed validation"
+    fi
+}
+
+_skills_tree() {
+    log_step "Skills directory structure"
+    echo ""
+
+    if [ ! -d "$SKILLS_DIR" ]; then
+        log_warn "No skills directory found"
+        return
+    fi
+
+    echo -e "${BOLD}skills/${NC}"
+    for skill_dir in "${SKILLS_DIR}"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name
+        skill_name=$(basename "$skill_dir")
+        local skill_md="${skill_dir}SKILL.md"
+        local desc=""
+        if [ -f "$skill_md" ]; then
+            desc=$(_extract_frontmatter_field "$skill_md" "name")
+        fi
+
+        echo -e "  ${GREEN}${skill_name}/${NC}"
+        # List files
+        for item in "${skill_dir}"*; do
+            [ -e "$item" ] || continue
+            local bname
+            bname=$(basename "$item")
+            if [ -f "$item" ]; then
+                echo "    ${bname}"
+            elif [ -d "$item" ]; then
+                echo -e "    ${BLUE}${bname}/${NC}"
+                for sub in "$item"/*; do
+                    [ -e "$sub" ] || continue
+                    echo "      $(basename "$sub")"
+                done
+            fi
+        done
+    done
+    echo ""
+}
+
+# Extract a YAML frontmatter field value from a SKILL.md file
+_extract_frontmatter_field() {
+    local file="$1"
+    local field="$2"
+
+    # Extract frontmatter block and find the field
+    awk -v field="$field" '
+    BEGIN { in_fm=0; found="" }
+    /^---$/ { in_fm++; next }
+    in_fm == 1 {
+        # Match field: value (possibly multiline, we take first line)
+        if ($0 ~ "^" field ":") {
+            sub("^" field ":[[:space:]]*", "")
+            found = $0
+        }
+    }
+    in_fm >= 2 { exit }
+    END { print found }
+    ' "$file"
+}
 
 # ===========================================================================
 # scaffold - Create full project directory structure
@@ -230,383 +526,71 @@ Utilities module.
     _write_if_missing "tests/integration/__init__.py" ""
 
     # -----------------------------------------------------------------------
-    # Source file stubs (empty modules with docstrings)
-    # Only created if they do not already exist.
+    # Source file stubs
     # -----------------------------------------------------------------------
-
-    # -- Core --
-    _write_if_missing "fingerprint/models.py" '"""
-Core data models for the fingerprinting system.
-
-All models use dataclasses for clean, type-safe data structures.
-Enums: FingerprintMode, ChangeClassification, ChangeType, ReviewStatus, AlertSeverity
-Dataclasses: PageStructure, StructureEmbedding, ChangeAnalysis, ExtractionStrategy,
-             ExtractedContent, ExtractionResult, ReviewItem, ChangeAlert, and more.
-"""
+    _write_if_missing "fingerprint/models.py" '"""Core data models (dataclasses and enums)."""
 '
-
-    _write_if_missing "fingerprint/config.py" '"""
-Configuration management using Pydantic settings.
-
-Loads configuration from:
-1. Environment variables (FINGERPRINT_* prefix)
-2. YAML configuration file
-3. Default values
-
-Key classes: FingerprintSettings, Config, load_config()
-"""
+    _write_if_missing "fingerprint/config.py" '"""Configuration management using Pydantic settings and YAML."""
 '
-
-    _write_if_missing "fingerprint/exceptions.py" '"""
-Custom exception hierarchy for the fingerprinting system.
-
-All exceptions inherit from FingerprintError for easy catching.
-Hierarchy:
-  FingerprintError
-    AnalysisError -> InvalidHTMLError, EmptyContentError
-    ChangeDetectionError -> IncompatibleStructuresError
-    MLError -> EmbeddingError, ModelLoadError
-    OllamaCloudError -> OllamaAuthError, OllamaTimeoutError, OllamaRateLimitError
-    StorageError -> RedisConnectionError, SerializationError
-    FetchError -> HTTPTimeoutError, HTTPStatusError
-    ComplianceError -> RobotsBlockedError, RateLimitExceededError, CrawlDelayError,
-                       BotDetectedError -> CaptchaEncounteredError
-    LegalComplianceError -> CFAAViolationError -> UnauthorizedAccessError,
-                            ToSViolationError, GDPRViolationError, CCPAViolationError
-"""
+    _write_if_missing "fingerprint/exceptions.py" '"""Custom exception hierarchy (all inherit from FingerprintError)."""
 '
-
-    _write_if_missing "fingerprint/__main__.py" '"""
-CLI entry point for the fingerprinting system.
-
-Usage:
-    fingerprint analyze --url https://example.com
-    fingerprint compare --url https://example.com --mode adaptive
-    fingerprint describe --url https://example.com
-    fingerprint extract --url https://example.com --output ./extracted --format json
-    fingerprint review list --limit 50
-    fingerprint review approve <item-id> --notes "Verified"
-"""
+    _write_if_missing "fingerprint/__main__.py" '"""CLI entry point (click-based)."""
 '
-
-    # -- Core module --
-    _write_if_missing "fingerprint/core/analyzer.py" '"""
-Main analyzer orchestrator.
-
-Coordinates fingerprinting operations across all modes:
-- Rules-based: Uses DOMStructureAnalyzer from adaptive module
-- ML-based: Uses embeddings and Ollama Cloud from ml module
-- Adaptive: Intelligently selects mode based on escalation triggers
-  (CLASS_VOLATILITY, RULES_UNCERTAINTY, KNOWN_VOLATILE, RENAME_PATTERN)
-
-Key class: StructureAnalyzer
-"""
+    _write_if_missing "fingerprint/core/analyzer.py" '"""Main analyzer orchestrator (StructureAnalyzer)."""
 '
-
-    _write_if_missing "fingerprint/core/fetcher.py" '"""
-HTTP fetcher with full compliance pipeline.
-
-All fetches pass through the ethical compliance pipeline:
-1. CFAA authorization check
-2. ToS check
-3. robots.txt check (RFC 9309)
-4. Rate limiting with Crawl-delay
-5. HTTP fetch
-6. Anti-bot detection
-7. GDPR/CCPA compliance
-
-Key classes: ComplianceFetcher, HTTPFetcher (internal only), FetchResult
-"""
+    _write_if_missing "fingerprint/core/fetcher.py" '"""HTTP fetcher with compliance pipeline (ComplianceFetcher, HTTPFetcher)."""
 '
-
-    _write_if_missing "fingerprint/core/verbose.py" '"""
-Verbose logging system with structured output.
-
-All modules use this for consistent logging format:
-[TIMESTAMP] [MODULE:OPERATION] Message
-  - detail_1
-  - detail_2
-
-Levels: 0=errors, 1=warnings, 2=info, 3=debug
-
-Key class: VerboseLogger
-Functions: get_logger(), set_logger()
-"""
+    _write_if_missing "fingerprint/core/verbose.py" '"""Verbose logging system (VerboseLogger, get_logger, set_logger)."""
 '
-
-    # -- Adaptive module --
-    _write_if_missing "fingerprint/adaptive/structure_analyzer.py" '"""
-Rules-based DOM structure analysis.
-
-Analyzes HTML to produce a PageStructure fingerprint:
-- Tag hierarchy and depth distribution
-- CSS class map and ID attributes
-- Semantic landmarks (header, nav, main, footer, etc.)
-- Content region detection
-- Script signature analysis and framework detection
-
-Key class: DOMStructureAnalyzer
-"""
+    _write_if_missing "fingerprint/adaptive/structure_analyzer.py" '"""Rules-based DOM structure analysis (DOMStructureAnalyzer)."""
 '
-
-    _write_if_missing "fingerprint/adaptive/change_detector.py" '"""
-Change detection and classification.
-
-Compares two PageStructure objects and produces a ChangeAnalysis:
-- Tag similarity (Jaccard coefficient)
-- Class similarity
-- Landmark comparison
-- Change classification: cosmetic (>0.95), minor (0.85-0.95),
-  moderate (0.70-0.85), breaking (<0.70)
-
-Key class: ChangeDetector
-"""
+    _write_if_missing "fingerprint/adaptive/change_detector.py" '"""Change detection and classification (ChangeDetector)."""
 '
-
-    _write_if_missing "fingerprint/adaptive/strategy_learner.py" '"""
-CSS selector inference for content extraction.
-
-Learns extraction strategies from page structures by:
-- Identifying content regions via landmark analysis
-- Inferring CSS selectors with fallbacks
-- Tracking confidence scores
-
-Key class: StrategyLearner
-"""
+    _write_if_missing "fingerprint/adaptive/strategy_learner.py" '"""CSS selector inference for extraction (StrategyLearner)."""
 '
-
-    # -- ML module --
-    _write_if_missing "fingerprint/ml/embeddings.py" '"""
-Embedding generation for semantic fingerprinting.
-
-Uses sentence-transformers to generate embeddings from structure descriptions.
-Default model: all-MiniLM-L6-v2 (384 dimensions)
-
-Key class: EmbeddingGenerator
-Methods: generate(), cosine_similarity()
-"""
+    _write_if_missing "fingerprint/ml/embeddings.py" '"""Embedding generation via sentence-transformers (EmbeddingGenerator)."""
 '
-
-    _write_if_missing "fingerprint/ml/ollama_client.py" '"""
-Ollama Cloud API client for LLM-powered descriptions.
-
-Endpoint: POST https://ollama.com/api/chat
-Authentication: Bearer token (OLLAMA_CLOUD_API_KEY)
-Default model: gemma3:12b
-
-Key class: OllamaCloudClient
-Methods: describe_structure(), analyze_change()
-"""
+    _write_if_missing "fingerprint/ml/ollama_client.py" '"""Ollama Cloud API client (OllamaCloudClient)."""
 '
-
-    _write_if_missing "fingerprint/ml/classifier.py" '"""
-Page type classification using embeddings.
-
-Uses cosine similarity with reference embeddings to classify page types:
-article, listing, product, home
-
-Key class: PageClassifier
-Methods: classify(), classify_with_confidence()
-"""
+    _write_if_missing "fingerprint/ml/classifier.py" '"""Page type classification using embeddings (PageClassifier)."""
 '
-
-    # -- Storage module --
-    _write_if_missing "fingerprint/storage/structure_store.py" '"""
-Redis storage for page structures.
-
-Key patterns:
-- {prefix}:structure:{domain}:{page_type}:{variant_id} - Current
-- {prefix}:structure:{domain}:{page_type}:{variant_id}:v{n} - History
-- {prefix}:volatile:{domain} - Volatile domain flag
-
-Key class: StructureStore
-Methods: save(), get(), delete(), list_versions(), is_volatile(), mark_volatile()
-"""
+    _write_if_missing "fingerprint/storage/structure_store.py" '"""Redis storage for page structures (StructureStore)."""
 '
-
-    _write_if_missing "fingerprint/storage/embedding_store.py" '"""
-Redis storage for structure embeddings.
-
-Key pattern: {prefix}:embedding:{domain}:{page_type}:{variant_id}
-
-Key class: EmbeddingStore
-Methods: save(), get(), delete()
-"""
+    _write_if_missing "fingerprint/storage/embedding_store.py" '"""Redis storage for embeddings (EmbeddingStore)."""
 '
-
-    _write_if_missing "fingerprint/storage/review_store.py" '"""
-Redis storage for review queue items.
-
-Key patterns:
-- {prefix}:review:pending              - Sorted set (ID -> timestamp)
-- {prefix}:review:item:{id}            - Individual review item
-- {prefix}:review:domain:{domain}      - Set of review IDs per domain
-- {prefix}:review:completed:{id}       - Archived completed reviews
-
-Key class: ReviewStore
-Methods: add(), get(), get_pending(), approve(), reject(), stats()
-"""
+    _write_if_missing "fingerprint/storage/review_store.py" '"""Redis storage for review queue (ReviewStore)."""
 '
-
-    _write_if_missing "fingerprint/storage/cache.py" '"""
-In-memory TTL-based caching utilities.
-
-Caches expensive operations: embedding generation, Ollama Cloud responses,
-structure comparisons.
-
-Key class: Cache[T]
-Methods: set(), get(), delete(), clear(), cleanup_expired(), stats()
-"""
+    _write_if_missing "fingerprint/storage/cache.py" '"""In-memory TTL-based cache (Cache[T])."""
 '
-
-    # -- Compliance module --
-    _write_if_missing "fingerprint/compliance/robots_parser.py" '"""
-robots.txt parser compliant with RFC 9309.
-
-Key features:
-- Full RFC 9309 compliance
-- Crawl-delay support
-- Sitemap discovery
-- Caching with TTL
-- Wildcard pattern matching (* and $)
-
-Key classes: RobotsParser, RobotsChecker, RobotsRule, RobotsData
-"""
+    _write_if_missing "fingerprint/compliance/robots_parser.py" '"""robots.txt parser - RFC 9309 (RobotsParser, RobotsChecker)."""
 '
-
-    _write_if_missing "fingerprint/compliance/rate_limiter.py" '"""
-Adaptive rate limiter with per-domain tracking.
-
-Features:
-- Per-domain delay tracking
-- Crawl-delay respect from robots.txt
-- Automatic backoff on errors/429s
-- Adaptive delay based on response times
-- Exponential backoff with configurable multiplier
-
-Key classes: RateLimiter, DomainState
-"""
+    _write_if_missing "fingerprint/compliance/rate_limiter.py" '"""Adaptive per-domain rate limiter (RateLimiter, DomainState)."""
 '
-
-    _write_if_missing "fingerprint/compliance/bot_detector.py" '"""
-Anti-bot detection and respect.
-
-Detects when the site has identified us as a bot and responds appropriately.
-We RESPECT anti-bot measures rather than trying to evade them.
-
-Detection types: CAPTCHA, block pages, rate limits, JS challenges
-
-Key classes: BotDetector, BotCheckResult
-"""
+    _write_if_missing "fingerprint/compliance/bot_detector.py" '"""Anti-bot detection and respect (BotDetector, BotCheckResult)."""
 '
-
-    # -- Legal module --
-    _write_if_missing "fingerprint/legal/cfaa_checker.py" '"""
-CFAA (Computer Fraud and Abuse Act) authorization checker.
-
-Blocks: login areas, API endpoints, internal/system paths,
-        auth query parameters, non-HTTP(S) schemes.
-
-Key classes: CFAAChecker, AuthorizationResult
-"""
+    _write_if_missing "fingerprint/legal/cfaa_checker.py" '"""CFAA authorization checker (CFAAChecker, AuthorizationResult)."""
 '
-
-    _write_if_missing "fingerprint/legal/tos_checker.py" '"""
-Terms of Service compliance checker.
-
-Respects: meta robots tags (noindex, nofollow, noarchive),
-          X-Robots-Tag headers.
-
-Key classes: ToSChecker, ToSResult
-"""
+    _write_if_missing "fingerprint/legal/tos_checker.py" '"""Terms of Service compliance (ToSChecker, ToSResult)."""
 '
-
-    _write_if_missing "fingerprint/legal/gdpr_handler.py" '"""
-GDPR (General Data Protection Regulation) compliance handler.
-
-PII detection: email, phone, IP, SSN, credit card, postal code, EU phone.
-Handling modes: redact, pseudonymize, skip.
-
-Key classes: GDPRHandler, PIIDetectionResult, PIIMatch
-"""
+    _write_if_missing "fingerprint/legal/gdpr_handler.py" '"""GDPR PII detection and handling (GDPRHandler, PIIDetectionResult)."""
 '
-
-    _write_if_missing "fingerprint/legal/ccpa_handler.py" '"""
-CCPA (California Consumer Privacy Act) compliance handler.
-
-Respects: GPC (Global Privacy Control) signal, "Do Not Sell" opt-outs.
-
-Key classes: CCPAHandler, CCPACheckResult
-"""
+    _write_if_missing "fingerprint/legal/ccpa_handler.py" '"""CCPA compliance handler (CCPAHandler, CCPACheckResult)."""
 '
-
-    # -- Extraction module --
-    _write_if_missing "fingerprint/extraction/extractor.py" '"""
-Content extraction engine.
-
-Extracts content from HTML using learned extraction strategies with
-CSS selectors, fallbacks, and post-processors.
-
-Key class: ContentExtractor
-Methods: extract(), extract_with_structure()
-"""
+    _write_if_missing "fingerprint/extraction/extractor.py" '"""Content extraction engine (ContentExtractor)."""
 '
-
-    _write_if_missing "fingerprint/extraction/file_writer.py" '"""
-File writer for extracted content.
-
-Saves extracted content to files in various formats.
-Output structure: extracted/{domain}/{page_type}/{date}_{hash}.{format}
-
-Key class: FileWriter
-Methods: save(), save_batch(), register_formatter()
-"""
+    _write_if_missing "fingerprint/extraction/file_writer.py" '"""File writer for extracted content (FileWriter)."""
 '
-
-    _write_if_missing "fingerprint/extraction/formats.py" '"""
-Output format handlers for extracted content.
-
-Formats: JSON, CSV, Markdown
-
-Key classes: OutputFormatter (ABC), JSONFormatter, CSVFormatter, MarkdownFormatter
-"""
+    _write_if_missing "fingerprint/extraction/formats.py" '"""Output format handlers: JSON, CSV, Markdown (OutputFormatter)."""
 '
-
-    # -- Alerting module --
-    _write_if_missing "fingerprint/alerting/change_monitor.py" '"""
-Monitor for breaking changes.
-
-Detects structure changes that exceed alert thresholds and creates alerts.
-
-Key class: ChangeMonitor
-"""
+    _write_if_missing "fingerprint/alerting/change_monitor.py" '"""Monitor for breaking changes (ChangeMonitor)."""
 '
-
-    _write_if_missing "fingerprint/alerting/review_queue.py" '"""
-Manual review queue for structure changes.
-
-Auto-approves cosmetic changes, requires review for breaking changes.
-
-Key class: ReviewQueue
-"""
+    _write_if_missing "fingerprint/alerting/review_queue.py" '"""Manual review queue (ReviewQueue)."""
 '
-
-    _write_if_missing "fingerprint/alerting/notifiers.py" '"""
-Alert notification channels: log, webhook, email.
-
-Key classes: LogNotifier, WebhookNotifier, EmailNotifier
-"""
+    _write_if_missing "fingerprint/alerting/notifiers.py" '"""Alert notifiers: log, webhook, email."""
 '
-
-    # -- Utils module --
-    _write_if_missing "fingerprint/utils/url_utils.py" '"""
-URL normalization and domain extraction utilities.
-"""
+    _write_if_missing "fingerprint/utils/url_utils.py" '"""URL normalization and domain extraction."""
 '
-
-    _write_if_missing "fingerprint/utils/html_utils.py" '"""
-HTML parsing utilities.
-"""
+    _write_if_missing "fingerprint/utils/html_utils.py" '"""HTML parsing utilities."""
 '
 
     # -----------------------------------------------------------------------
@@ -676,7 +660,7 @@ testpaths = ["tests"]
     # -----------------------------------------------------------------------
     # requirements.txt
     # -----------------------------------------------------------------------
-    _write_if_missing "requirements.txt" '# Core dependencies
+    _write_if_missing "requirements.txt" '# Core
 httpx>=0.27.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
@@ -685,19 +669,13 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 pyyaml>=6.0.0
 
-# ML dependencies
+# ML
 sentence-transformers>=2.3.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
 
-# Optional ML backends (install as needed)
-# xgboost>=2.0.0
-# lightgbm>=4.0.0
-
-# Async support
+# Async & CLI
 anyio>=4.0.0
-
-# CLI
 click>=8.1.0
 rich>=13.0.0
 '
@@ -705,94 +683,57 @@ rich>=13.0.0
     # -----------------------------------------------------------------------
     # Example scripts
     # -----------------------------------------------------------------------
-    _write_if_missing "examples/basic_fingerprint.py" '"""
-Basic fingerprinting example.
-
-Usage:
-    python examples/basic_fingerprint.py
-"""
+    _write_if_missing "examples/basic_fingerprint.py" '"""Basic fingerprinting example."""
 
 import asyncio
 from fingerprint.config import load_config
 from fingerprint.core.analyzer import StructureAnalyzer
 
-
 async def main():
     config = load_config()
     analyzer = StructureAnalyzer(config)
-
-    # Analyze a URL
     structure = await analyzer.analyze_url("https://example.com/article")
     print(f"Page type: {structure.page_type}")
-    print(f"Classes: {len(structure.css_class_map)}")
-
-    # Compare with stored version
     changes = await analyzer.compare_with_stored("https://example.com/article")
-    print(f"Similarity: {changes.similarity:.3f}")
-    print(f"Breaking: {changes.breaking}")
-
+    print(f"Similarity: {changes.similarity:.3f}, Breaking: {changes.breaking}")
 
 if __name__ == "__main__":
     asyncio.run(main())
 '
 
-    _write_if_missing "examples/adaptive_mode.py" '"""
-Adaptive mode example.
-
-Usage:
-    python examples/adaptive_mode.py
-"""
+    _write_if_missing "examples/adaptive_mode.py" '"""Adaptive mode example."""
 
 import asyncio
 from fingerprint.config import load_config
 from fingerprint.core.analyzer import StructureAnalyzer
-
 
 async def main():
     config = load_config()
     config.mode = "adaptive"
-
     analyzer = StructureAnalyzer(config)
-
-    # Adaptive mode automatically selects best approach
     result = await analyzer.compare_with_stored("https://example.com")
-
     print(f"Mode used: {result.mode_used.value}")
     if result.escalated:
-        print("Escalated to ML because:")
         for trigger in result.escalation_triggers:
-            print(f"  - {trigger.name}: {trigger.reason}")
-
+            print(f"  Escalated: {trigger.name} - {trigger.reason}")
 
 if __name__ == "__main__":
     asyncio.run(main())
 '
 
-    _write_if_missing "examples/ml_fingerprint.py" '"""
-ML mode with Ollama Cloud example.
-
-Usage:
-    export OLLAMA_CLOUD_API_KEY="your-api-key"
-    python examples/ml_fingerprint.py
-"""
+    _write_if_missing "examples/ml_fingerprint.py" '"""ML mode with Ollama Cloud example (set OLLAMA_CLOUD_API_KEY)."""
 
 import asyncio
 from fingerprint.config import load_config
 from fingerprint.core.analyzer import StructureAnalyzer
 
-
 async def main():
     config = load_config()
     config.ollama_cloud.enabled = True
-
     analyzer = StructureAnalyzer(config)
-
     structure = await analyzer.analyze_url("https://example.com")
     description = await analyzer.generate_description(structure)
-
-    print("LLM Description:")
     print(description)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -803,7 +744,7 @@ if __name__ == "__main__":
     echo "  Next steps:"
     echo "    ./skills.sh config     # Generate configuration files"
     echo "    ./skills.sh deps       # Install dependencies"
-    echo "    ./skills.sh info       # View architecture summary"
+    echo "    ./skills.sh skills     # View available Agent Skills"
 }
 
 # ===========================================================================
@@ -812,7 +753,6 @@ if __name__ == "__main__":
 cmd_deps() {
     log_step "Setting up Python virtual environment and installing dependencies"
 
-    # Check Python version
     local py_cmd=""
     for cmd in python3.11 python3.12 python3.13 python3; do
         if command -v "$cmd" &>/dev/null; then
@@ -835,7 +775,6 @@ cmd_deps() {
 
     log_info "Using $py_cmd ($($py_cmd --version 2>&1))"
 
-    # Create virtual environment
     if [ ! -d "$VENV_DIR" ]; then
         log_info "Creating virtual environment at ${VENV_DIR}"
         "$py_cmd" -m venv "$VENV_DIR"
@@ -843,18 +782,14 @@ cmd_deps() {
         log_info "Virtual environment already exists at ${VENV_DIR}"
     fi
 
-    # Upgrade pip
     log_info "Upgrading pip"
     "$PIP" install --upgrade pip --quiet
 
-    # Install package in editable mode with dev dependencies
     log_info "Installing adaptive-fingerprint in editable mode with dev dependencies"
     "$PIP" install -e "${PROJECT_ROOT}[dev]" --quiet 2>&1 | tail -5
 
     log_ok "Dependencies installed successfully!"
-    echo ""
-    echo "  Activate the environment with:"
-    echo "    source ${VENV_DIR}/bin/activate"
+    echo "  Activate: source ${VENV_DIR}/bin/activate"
 }
 
 # ===========================================================================
@@ -863,29 +798,19 @@ cmd_deps() {
 cmd_config() {
     log_step "Generating configuration files"
 
-    # -----------------------------------------------------------------------
-    # config.example.yaml
-    # -----------------------------------------------------------------------
     _write_if_missing "config.example.yaml" '# Adaptive Fingerprint Configuration
-
-# Fingerprinting mode: "rules", "ml", or "adaptive"
 fingerprinting:
   mode: adaptive
-
-  # Adaptive mode settings
   adaptive:
-    class_change_threshold: 0.15      # Trigger ML if >15% classes changed
-    rules_uncertainty_threshold: 0.80  # Trigger ML if rules similarity < 0.80
+    class_change_threshold: 0.15
+    rules_uncertainty_threshold: 0.80
     cache_ml_results: true
-
-  # Change classification thresholds
   thresholds:
-    cosmetic: 0.95    # > 0.95 = cosmetic change
-    minor: 0.85       # 0.85-0.95 = minor change
-    moderate: 0.70    # 0.70-0.85 = moderate change
-    breaking: 0.70    # < 0.70 = breaking change
+    cosmetic: 0.95
+    minor: 0.85
+    moderate: 0.70
+    breaking: 0.70
 
-# Ollama Cloud LLM settings
 ollama_cloud:
   enabled: true
   model: "gemma3:12b"
@@ -894,127 +819,98 @@ ollama_cloud:
   temperature: 0.3
   max_tokens: 500
 
-# Embedding model settings
 embeddings:
   model: "all-MiniLM-L6-v2"
   cache_embeddings: true
 
-# Redis storage
 redis:
   url: "redis://localhost:6379/0"
   key_prefix: "fingerprint"
-  ttl_seconds: 604800  # 7 days
+  ttl_seconds: 604800
   max_versions: 10
 
-# HTTP fetching
 http:
   user_agent: "AdaptiveFingerprint/1.0 (+https://example.com/bot-info)"
   timeout: 30
   max_retries: 3
 
-# Compliance settings (ethical web access)
 compliance:
-  # robots.txt (RFC 9309)
   robots_txt:
     enabled: true
-    cache_ttl: 3600           # Cache robots.txt for 1 hour
+    cache_ttl: 3600
     respect_crawl_delay: true
-    default_crawl_delay: 1.0  # Seconds between requests if not specified
-
-  # Adaptive rate limiting
+    default_crawl_delay: 1.0
   rate_limiting:
     enabled: true
-    default_delay: 1.0        # Default delay between requests (seconds)
-    min_delay: 0.5            # Minimum delay
-    max_delay: 30.0           # Maximum delay
-    backoff_multiplier: 2.0   # Backoff on 429/503 responses
-    adapt_to_response_time: true  # Slow down if server is slow
-
-  # Anti-bot respect
+    default_delay: 1.0
+    min_delay: 0.5
+    max_delay: 30.0
+    backoff_multiplier: 2.0
+    adapt_to_response_time: true
   anti_bot:
     enabled: true
     respect_retry_after: true
     stop_on_captcha: true
     stop_on_block_page: true
 
-# Legal compliance
 legal:
-  # CFAA (Computer Fraud and Abuse Act)
   cfaa:
     enabled: true
-    require_public_access: true      # Only access publicly available pages
-    block_authenticated_areas: true  # Do not access login-protected content
-    block_api_endpoints: true        # Do not access API endpoints without permission
-
-  # Terms of Service
+    require_public_access: true
+    block_authenticated_areas: true
+    block_api_endpoints: true
   tos:
     enabled: true
-    check_meta_tags: true     # Check for meta robots tags
-    respect_noindex: true     # Respect noindex directives
-    respect_nofollow: true    # Respect nofollow directives
-
-  # GDPR (General Data Protection Regulation)
+    check_meta_tags: true
+    respect_noindex: true
+    respect_nofollow: true
   gdpr:
     enabled: true
-    pii_detection: true       # Detect personally identifiable information
-    pii_handling: "redact"    # "redact", "pseudonymize", or "skip"
-    log_pii_access: true      # Log when PII is encountered
-
-  # CCPA (California Consumer Privacy Act)
+    pii_detection: true
+    pii_handling: "redact"
+    log_pii_access: true
   ccpa:
     enabled: true
-    respect_opt_out: true     # Respect "do not sell" signals
-    respect_gpc: true         # Respect Global Privacy Control header
+    respect_opt_out: true
+    respect_gpc: true
 
-# Content extraction
 extraction:
   enabled: true
-  output_dir: "./extracted"           # Directory for extracted content
-  formats: ["json", "csv"]            # Output formats
-  include_metadata: true              # Include extraction metadata
-  include_html: false                 # Include raw HTML in output
-  max_content_length: 1000000         # Max content size (bytes)
+  output_dir: "./extracted"
+  formats: ["json", "csv"]
+  include_metadata: true
+  include_html: false
+  max_content_length: 1000000
 
-# Change alerting and review
 alerting:
   enabled: true
-
-  # Alert thresholds
-  alert_on_breaking: true             # Alert on breaking changes
-  alert_on_moderate: false            # Alert on moderate changes
-  alert_threshold: 0.70               # Similarity below this triggers alert
-
-  # Review queue
+  alert_on_breaking: true
+  alert_on_moderate: false
+  alert_threshold: 0.70
   review_queue:
     enabled: true
-    auto_approve_cosmetic: true       # Auto-approve cosmetic changes
-    auto_approve_minor: false         # Auto-approve minor changes
-    require_review_breaking: true     # Require manual review for breaking
-    max_queue_size: 1000              # Max pending reviews
-
-  # Notifications
+    auto_approve_cosmetic: true
+    auto_approve_minor: false
+    require_review_breaking: true
+    max_queue_size: 1000
   notifications:
-    log: true                         # Log alerts
+    log: true
     webhook:
       enabled: false
-      url: ""                         # Webhook URL for alerts
+      url: ""
     email:
       enabled: false
       smtp_host: ""
       smtp_port: 587
       recipients: []
 
-# Verbose logging
 verbose:
   enabled: true
-  level: 2  # 0=errors, 1=warnings, 2=info, 3=debug
-  format: "structured"  # "structured" or "plain"
+  level: 2
+  format: "structured"
   include_timestamp: true
 '
 
-    # -----------------------------------------------------------------------
-    # .env.example
-    # -----------------------------------------------------------------------
     _write_if_missing ".env.example" '# Required for Ollama Cloud LLM integration
 OLLAMA_CLOUD_API_KEY=your-api-key-here
 
@@ -1024,10 +920,9 @@ FINGERPRINT_VERBOSE=2
 REDIS_URL=redis://localhost:6379/0
 '
 
-    # Copy example to actual config if not present
     if [ ! -f "${PROJECT_ROOT}/config.yaml" ]; then
         cp "${PROJECT_ROOT}/config.example.yaml" "${PROJECT_ROOT}/config.yaml"
-        log_info "Copied config.example.yaml -> config.yaml (edit as needed)"
+        log_info "Copied config.example.yaml -> config.yaml"
     fi
 
     if [ ! -f "${PROJECT_ROOT}/.env" ]; then
@@ -1045,21 +940,16 @@ cmd_redis() {
     log_step "Starting Redis for structure storage"
 
     if ! command -v docker &>/dev/null; then
-        log_error "Docker is not installed. Please install Docker or provide a Redis instance."
-        echo ""
-        echo "  Manual Redis setup:"
-        echo "    export REDIS_URL=redis://your-redis-host:6379/0"
+        log_error "Docker is not installed. Install Docker or set REDIS_URL manually."
         exit 1
     fi
 
-    # Check if container already running
     if docker ps --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER_NAME}$"; then
         log_info "Redis container '${REDIS_CONTAINER_NAME}' is already running"
         echo "  Redis URL: redis://localhost:${REDIS_PORT}/0"
         return
     fi
 
-    # Check if container exists but stopped
     if docker ps -a --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER_NAME}$"; then
         log_info "Starting existing Redis container"
         docker start "${REDIS_CONTAINER_NAME}" >/dev/null
@@ -1071,7 +961,6 @@ cmd_redis() {
             redis:7-alpine >/dev/null
     fi
 
-    # Wait for Redis to be ready
     local retries=10
     while [ $retries -gt 0 ]; do
         if docker exec "${REDIS_CONTAINER_NAME}" redis-cli ping 2>/dev/null | grep -q PONG; then
@@ -1086,9 +975,7 @@ cmd_redis() {
         exit 1
     fi
 
-    log_ok "Redis is running"
-    echo "  Container: ${REDIS_CONTAINER_NAME}"
-    echo "  URL:       redis://localhost:${REDIS_PORT}/0"
+    log_ok "Redis is running at redis://localhost:${REDIS_PORT}/0"
 }
 
 # ===========================================================================
@@ -1115,11 +1002,9 @@ cmd_redis_stop() {
 # ===========================================================================
 cmd_lint() {
     log_step "Running linter (ruff)"
-
     _ensure_venv
 
     if ! "${VENV_DIR}/bin/ruff" --version &>/dev/null 2>&1; then
-        log_info "Installing ruff..."
         "$PIP" install ruff --quiet
     fi
 
@@ -1128,22 +1013,17 @@ cmd_lint() {
 }
 
 # ===========================================================================
-# test - Run the test suite
+# test - Run test suite
 # ===========================================================================
 cmd_test() {
     log_step "Running test suite"
-
     _ensure_venv
 
     if ! "${VENV_DIR}/bin/pytest" --version &>/dev/null 2>&1; then
-        log_info "Installing pytest..."
         "$PIP" install pytest pytest-asyncio pytest-cov --quiet
     fi
 
-    "${VENV_DIR}/bin/pytest" "${PROJECT_ROOT}/tests" \
-        --tb=short \
-        -v \
-        "$@"
+    "${VENV_DIR}/bin/pytest" "${PROJECT_ROOT}/tests" --tb=short -v "$@"
 }
 
 # ===========================================================================
@@ -1152,31 +1032,15 @@ cmd_test() {
 cmd_clean() {
     log_step "Cleaning generated artifacts"
 
-    # __pycache__
     find "${PROJECT_ROOT}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-    log_info "Removed __pycache__ directories"
-
-    # .pytest_cache
     rm -rf "${PROJECT_ROOT}/.pytest_cache"
-    log_info "Removed .pytest_cache"
-
-    # egg-info
     rm -rf "${PROJECT_ROOT}"/*.egg-info
     rm -rf "${PROJECT_ROOT}"/fingerprint/*.egg-info
-    log_info "Removed egg-info directories"
+    [ -d "${PROJECT_ROOT}/extracted" ] && rm -rf "${PROJECT_ROOT}/extracted"
 
-    # extracted output
-    if [ -d "${PROJECT_ROOT}/extracted" ]; then
-        rm -rf "${PROJECT_ROOT}/extracted"
-        log_info "Removed extracted/ output directory"
-    fi
-
-    # Optional: remove venv
-    if [ "${1:-}" = "--all" ]; then
-        if [ -d "$VENV_DIR" ]; then
-            rm -rf "$VENV_DIR"
-            log_info "Removed virtual environment"
-        fi
+    if [ "${1:-}" = "--all" ] && [ -d "$VENV_DIR" ]; then
+        rm -rf "$VENV_DIR"
+        log_info "Removed virtual environment"
     fi
 
     log_ok "Clean complete"
@@ -1190,76 +1054,47 @@ cmd_info() {
     echo -e "${BOLD}Adaptive Structure Fingerprinting System${NC}"
     echo -e "${BOLD}=========================================${NC}"
     echo ""
-    echo "An intelligent web structure fingerprinting system with adaptive"
-    echo "learning, Ollama Cloud LLM integration, ethical compliance,"
-    echo "and comprehensive verbose logging."
+    echo "Intelligent web structure fingerprinting with adaptive learning,"
+    echo "Ollama Cloud LLM integration, ethical compliance, and verbose logging."
     echo ""
     echo -e "${BOLD}Fingerprinting Modes:${NC}"
-    echo "  rules     ~15ms   Fast, deterministic DOM structure analysis"
-    echo "  ml        ~200ms  Semantic similarity via sentence-transformers"
-    echo "  adaptive  ~15-200ms  Smart selection: rules first, ML on escalation"
+    echo "  rules     ~15ms     Deterministic DOM structure analysis"
+    echo "  ml        ~200ms    Semantic similarity via sentence-transformers"
+    echo "  adaptive  ~15-200ms Smart: rules first, ML on escalation"
     echo ""
     echo -e "${BOLD}Escalation Triggers (adaptive mode):${NC}"
     echo "  CLASS_VOLATILITY   >15% of CSS classes changed"
     echo "  RULES_UNCERTAINTY  Rules similarity < 0.80"
-    echo "  KNOWN_VOLATILE     Domain flagged as volatile in history"
-    echo "  RENAME_PATTERN     Detected CSS class rename patterns"
+    echo "  KNOWN_VOLATILE     Domain flagged volatile"
+    echo "  RENAME_PATTERN     CSS class rename patterns"
     echo ""
-    echo -e "${BOLD}Change Classification Thresholds:${NC}"
-    echo "  cosmetic   > 0.95  similarity"
-    echo "  minor      0.85 - 0.95"
-    echo "  moderate   0.70 - 0.85"
-    echo "  breaking   < 0.70"
+    echo -e "${BOLD}Change Thresholds:${NC}"
+    echo "  cosmetic > 0.95 | minor 0.85-0.95 | moderate 0.70-0.85 | breaking < 0.70"
     echo ""
-    echo -e "${BOLD}Compliance Pipeline (mandatory for all fetches):${NC}"
-    echo "  1. CFAA Check        Is access authorized?"
-    echo "  2. ToS Check         Does ToS allow crawling?"
-    echo "  3. robots.txt        Is path allowed? (RFC 9309)"
-    echo "  4. Rate Limiter      Acquire slot, respect Crawl-delay"
-    echo "  5. HTTP Fetch        Make request with proper headers"
-    echo "  6. Anti-Bot Check    Detect captcha/block pages"
-    echo "  7. GDPR/CCPA Check   Scan for PII, apply handling"
+    echo -e "${BOLD}Compliance Pipeline (mandatory):${NC}"
+    echo "  1. CFAA  2. ToS  3. robots.txt  4. Rate Limit  5. Fetch  6. Anti-Bot  7. GDPR/CCPA"
     echo ""
-    echo -e "${BOLD}Package Structure:${NC}"
+    echo -e "${BOLD}Agent Skills (./skills.sh skills):${NC}"
+    if [ -d "$SKILLS_DIR" ]; then
+        for skill_dir in "${SKILLS_DIR}"/*/; do
+            [ -d "$skill_dir" ] || continue
+            [ -f "${skill_dir}SKILL.md" ] || continue
+            local sname
+            sname=$(_extract_frontmatter_field "${skill_dir}SKILL.md" "name")
+            printf "  %-28s %s\n" "$sname" "${skill_dir}SKILL.md"
+        done
+    fi
+    echo ""
+    echo -e "${BOLD}Package Layout:${NC}"
     echo "  fingerprint/"
-    echo "    __main__.py         CLI entry point"
-    echo "    config.py           Configuration (Pydantic settings + YAML)"
-    echo "    models.py           Core data models (dataclasses)"
-    echo "    exceptions.py       Custom exception hierarchy"
-    echo "    core/               Orchestrator, fetcher, verbose logging"
-    echo "    adaptive/           Rules-based DOM analysis, change detection"
-    echo "    ml/                 Embeddings, Ollama Cloud, classifier"
-    echo "    storage/            Redis: structures, embeddings, review queue"
-    echo "    compliance/         robots.txt (RFC 9309), rate limiter, bot detector"
-    echo "    legal/              CFAA, ToS, GDPR, CCPA"
-    echo "    extraction/         Content extractor, file writer, format handlers"
-    echo "    alerting/           Change monitor, review queue, notifiers"
-    echo "    utils/              URL and HTML utilities"
-    echo ""
-    echo -e "${BOLD}External Services:${NC}"
-    echo "  Redis           Structure storage, versioning, review queue"
-    echo "  Ollama Cloud    LLM descriptions (gemma3:12b default)"
-    echo ""
-    echo -e "${BOLD}Verbose Logging Modules:${NC}"
-    echo "  ANALYZER  STRUCTURE  CHANGE   ADAPTIVE  ML       OLLAMA"
-    echo "  STORE     ROBOTS     RATELIMIT ANTIBOT  CFAA     TOS"
-    echo "  GDPR      CCPA       EXTRACT  FILEWRITER ALERT   REVIEW"
-    echo "  NOTIFY    CLASSIFY   CACHE    FETCH     EMBED_STORE"
-    echo ""
-    echo -e "${BOLD}CLI Commands:${NC}"
-    echo "  fingerprint analyze   --url <URL>              Analyze structure"
-    echo "  fingerprint compare   --url <URL> --mode <M>   Compare with stored"
-    echo "  fingerprint describe  --url <URL>              Generate LLM description"
-    echo "  fingerprint extract   --url <URL> --format F   Extract content"
-    echo "  fingerprint review    list|approve|reject|stats Review queue"
-    echo ""
-    echo -e "${BOLD}Redis Key Schema:${NC}"
-    echo "  {prefix}:structure:{domain}:{page_type}:{variant}      Current"
-    echo "  {prefix}:structure:{domain}:{page_type}:{variant}:v{n} Version"
-    echo "  {prefix}:embedding:{domain}:{page_type}:{variant}      Embedding"
-    echo "  {prefix}:volatile:{domain}                              Volatile flag"
-    echo "  {prefix}:review:pending                                 Queue"
-    echo "  {prefix}:review:item:{id}                               Item data"
+    echo "    core/        Orchestrator, fetcher, verbose logging"
+    echo "    adaptive/    DOM analysis, change detection, strategy learning"
+    echo "    ml/          Embeddings, Ollama Cloud, page classifier"
+    echo "    storage/     Redis: structures, embeddings, review queue"
+    echo "    compliance/  robots.txt (RFC 9309), rate limiter, bot detector"
+    echo "    legal/       CFAA, ToS, GDPR, CCPA"
+    echo "    extraction/  Content extractor, file writer, format handlers"
+    echo "    alerting/    Change monitor, review queue, notifiers"
     echo ""
 }
 
@@ -1270,14 +1105,12 @@ cmd_doctor() {
     log_step "Checking prerequisites"
     local all_ok=true
 
-    # Python
     echo -n "  Python 3.11+ ... "
     local py_found=false
     for cmd in python3.11 python3.12 python3.13 python3; do
         if command -v "$cmd" &>/dev/null; then
-            local ver
+            local ver major minor
             ver=$("$cmd" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-            local major minor
             major=$(echo "$ver" | cut -d. -f1)
             minor=$(echo "$ver" | cut -d. -f2)
             if [ "$major" -ge 3 ] && [ "$minor" -ge 11 ]; then
@@ -1287,85 +1120,69 @@ cmd_doctor() {
             fi
         fi
     done
-    if [ "$py_found" = false ]; then
-        echo -e "${RED}MISSING${NC}"
-        all_ok=false
-    fi
+    [ "$py_found" = false ] && { echo -e "${RED}MISSING${NC}"; all_ok=false; }
 
-    # pip
     echo -n "  pip ... "
     if command -v pip3 &>/dev/null || command -v pip &>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}MISSING${NC}"
-        all_ok=false
+        echo -e "${RED}MISSING${NC}"; all_ok=false
     fi
 
-    # Docker (optional)
     echo -n "  Docker ... "
     if command -v docker &>/dev/null; then
-        echo -e "${GREEN}OK${NC} ($(docker --version 2>/dev/null | head -1))"
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${YELLOW}NOT FOUND${NC} (optional - needed for Redis container)"
+        echo -e "${YELLOW}NOT FOUND${NC} (optional)"
     fi
 
-    # Redis (check connectivity)
     echo -n "  Redis ... "
-    if command -v redis-cli &>/dev/null; then
-        if redis-cli -p "${REDIS_PORT}" ping 2>/dev/null | grep -q PONG; then
-            echo -e "${GREEN}OK${NC} (localhost:${REDIS_PORT})"
-        else
-            echo -e "${YELLOW}NOT RUNNING${NC} (run: ./skills.sh redis)"
-        fi
+    if command -v redis-cli &>/dev/null && redis-cli -p "${REDIS_PORT}" ping 2>/dev/null | grep -q PONG; then
+        echo -e "${GREEN}OK${NC} (localhost:${REDIS_PORT})"
     elif docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${REDIS_CONTAINER_NAME}$"; then
-        echo -e "${GREEN}OK${NC} (Docker container)"
+        echo -e "${GREEN}OK${NC} (Docker)"
     else
         echo -e "${YELLOW}NOT RUNNING${NC} (run: ./skills.sh redis)"
     fi
 
-    # Git
     echo -n "  Git ... "
     if command -v git &>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}MISSING${NC}"
-        all_ok=false
+        echo -e "${RED}MISSING${NC}"; all_ok=false
     fi
 
-    # Virtual environment
     echo -n "  Virtual env ... "
     if [ -d "$VENV_DIR" ]; then
-        echo -e "${GREEN}OK${NC} (${VENV_DIR})"
+        echo -e "${GREEN}OK${NC}"
     else
         echo -e "${YELLOW}NOT CREATED${NC} (run: ./skills.sh deps)"
     fi
 
-    # Config files
-    echo -n "  config.yaml ... "
-    if [ -f "${PROJECT_ROOT}/config.yaml" ]; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${YELLOW}MISSING${NC} (run: ./skills.sh config)"
+    echo -n "  Skills ... "
+    local skill_count=0
+    if [ -d "$SKILLS_DIR" ]; then
+        for sd in "${SKILLS_DIR}"/*/; do
+            [ -f "${sd}SKILL.md" ] && skill_count=$((skill_count + 1))
+        done
     fi
-
-    echo -n "  .env ... "
-    if [ -f "${PROJECT_ROOT}/.env" ]; then
-        echo -e "${GREEN}OK${NC}"
+    if [ "$skill_count" -gt 0 ]; then
+        echo -e "${GREEN}${skill_count} skills found${NC}"
     else
-        echo -e "${YELLOW}MISSING${NC} (run: ./skills.sh config)"
+        echo -e "${YELLOW}NONE${NC}"
     fi
 
     echo ""
     if [ "$all_ok" = true ]; then
-        log_ok "All required prerequisites are available"
+        log_ok "All required prerequisites available"
     else
-        log_error "Some required prerequisites are missing"
+        log_error "Some prerequisites missing"
         exit 1
     fi
 }
 
 # ===========================================================================
-# help - Show usage
+# help
 # ===========================================================================
 cmd_help() {
     echo ""
@@ -1373,26 +1190,33 @@ cmd_help() {
     echo ""
     echo "Usage: ./skills.sh <command> [options]"
     echo ""
-    echo "Commands:"
-    echo "  scaffold      Create full project directory structure and source stubs"
-    echo "  deps          Create venv and install Python dependencies"
-    echo "  config        Generate config.example.yaml, .env.example, config.yaml, .env"
+    echo -e "${BOLD}Agent Skills:${NC}"
+    echo "  skills              List all Agent Skills (SKILL.md format)"
+    echo "  skills show <name>  Display a skill's full content"
+    echo "  skills validate     Validate all skills against the spec"
+    echo "  skills tree         Show skills directory tree"
+    echo ""
+    echo -e "${BOLD}Project Setup:${NC}"
+    echo "  scaffold      Create project directories and source file stubs"
+    echo "  deps          Create venv and install dependencies"
+    echo "  config        Generate config.yaml and .env files"
     echo "  redis         Start Redis via Docker (port ${REDIS_PORT})"
-    echo "  redis-stop    Stop the Redis Docker container"
-    echo "  lint          Run ruff linter on the fingerprint package"
-    echo "  test          Run pytest test suite"
-    echo "  clean         Remove __pycache__, .pytest_cache, egg-info, extracted/"
+    echo "  redis-stop    Stop the Redis container"
+    echo ""
+    echo -e "${BOLD}Development:${NC}"
+    echo "  lint          Run ruff linter"
+    echo "  test          Run pytest suite"
+    echo "  clean         Remove __pycache__, .pytest_cache, egg-info"
     echo "  clean --all   Also remove the virtual environment"
-    echo "  info          Display project architecture and module summary"
-    echo "  doctor        Verify all prerequisites (Python, Docker, Redis, etc.)"
-    echo "  help          Show this help message"
+    echo ""
+    echo -e "${BOLD}Information:${NC}"
+    echo "  info          Architecture and module summary"
+    echo "  doctor        Check prerequisites"
+    echo "  help          Show this help"
     echo ""
     echo "Quick start:"
-    echo "  ./skills.sh doctor       # Check prerequisites"
-    echo "  ./skills.sh scaffold     # Create project structure"
-    echo "  ./skills.sh config       # Generate config files"
-    echo "  ./skills.sh deps         # Install dependencies"
-    echo "  ./skills.sh redis        # Start Redis"
+    echo "  ./skills.sh doctor && ./skills.sh scaffold && ./skills.sh config && ./skills.sh deps"
+    echo "  ./skills.sh skills            # See Agent Skills"
     echo "  source .venv/bin/activate"
     echo "  fingerprint analyze --url https://example.com"
     echo ""
@@ -1402,7 +1226,6 @@ cmd_help() {
 # Utility functions
 # ===========================================================================
 
-# Write file only if it does not already exist
 _write_if_missing() {
     local filepath="${PROJECT_ROOT}/$1"
     local content="$2"
@@ -1416,7 +1239,6 @@ _write_if_missing() {
     fi
 }
 
-# Ensure virtual environment exists
 _ensure_venv() {
     if [ ! -d "$VENV_DIR" ]; then
         log_error "Virtual environment not found. Run: ./skills.sh deps"
@@ -1432,6 +1254,7 @@ main() {
     shift || true
 
     case "$cmd" in
+        skills)     cmd_skills "$@" ;;
         scaffold)   cmd_scaffold "$@" ;;
         deps)       cmd_deps "$@" ;;
         config)     cmd_config "$@" ;;
