@@ -157,3 +157,7 @@ compliance:
 | `ANTIBOT:CAPTCHA` | CAPTCHA detected |
 | `ANTIBOT:BLOCKED` | Block page detected |
 | `ANTIBOT:RATELIMIT` | Rate limit response detected |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, regex patterns, and backoff algorithms

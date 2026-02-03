@@ -122,3 +122,10 @@ PageStructure + StoredPageStructure -> ChangeDetector -> ChangeAnalysis
 PageStructure -> EmbeddingGenerator -> StructureEmbedding (ML mode)
 PageStructure -> OllamaCloudClient -> description string (optional)
 ```
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code
+- [compliance-pipeline.md](references/compliance-pipeline.md) - Detailed compliance pipeline steps
+- [data-models.md](references/data-models.md) - All dataclass and enum definitions
+- [exceptions.md](references/exceptions.md) - Custom exception hierarchy

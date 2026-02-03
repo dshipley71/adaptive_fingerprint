@@ -141,3 +141,7 @@ ExtractionStrategy(
 | `CHANGE:SIMILARITY` | Component similarities calculated |
 | `CHANGE:CLASSIFY` | Change classified |
 | `CHANGE:DETAIL` | Individual change detected |
+
+## References
+
+- [agents-spec.md](references/agents-spec.md) - Complete Python implementation with full source code, algorithms, and regex patterns
